@@ -11,8 +11,18 @@ import codecs, subprocess, tempfile, datetime
 import optparse
 from ctypes import *
 
-__version__ = ('1.22', '2020-01-21')
+__version__ = ('1.23', '2022-07-08')
 
+
+def GetCdSize(pathname):
+	"Gets the RAW CD size in mm,ss,ff"
+	# pipe to read FFmpeg info from STDERR
+	proc = subprocess.Popen('ffmpeg -i "%s"' % pathname, stderr=subprocess.PIPE)
+	s = proc.stderr.read()
+	# Analyze "Duration" line from ffmpeg
+	m1 = re.search(b"Duration: (\\d{2}):(\\d{2}):(\\d{2})\\.(\\d{2})", s, re.M | re.S)
+	#~ print('DBG: cdsize (mm,ss,ff):', 60*int(m1.group(1)) + int(m1.group(2)), int(m1.group(3)), int(m1.group(4)) )
+	return ( 60*int(m1.group(1)) + int(m1.group(2)), int(m1.group(3)), int(m1.group(4)) )
 
 def GetDOSNameW(pathname):
 	"Retrieves the short DOS name from a long one, using Win32 API"
@@ -73,7 +83,7 @@ def mmssff2bytes(mm, ss, ff):
 	bps = 2*44100*2 # bytes per second, stereo, 16-bit, 44.1 kHz
 	return mm*60*bps + ss*bps + 2352*ff # 1 frame = 1/75 sec, 0-based = 2352 bytes
 
-def parse_cuesheet(filename, titleparser=None):
+def parse_cuesheet(filename, cdsize, titleparser=None):
 	def unquote(s): return b'"' + s[1:-1].replace(b'"', b'\\"') + b'"'
 	catalog = {}
 	lastFILE, lastTRK = b'', -1
@@ -105,7 +115,7 @@ def parse_cuesheet(filename, titleparser=None):
 			indexes += [(mm,ss,ff)]
 			catalog[lastTRK] = [lastFILE, indexes[-1], None, force_decode(trkmeta)] # {tracknum: [name, begin, duration, metadata] } 
 	catalog['tracks'] = lastTRK
-	indexes +=[(120,00,00)]
+	indexes +=[cdsize]
 	track = 0
 	for first, next in zip(indexes, indexes[1:]):
 		track += 1
@@ -128,8 +138,9 @@ def extract_tracks(image, cue=None, destparser=None, titleparser=None, format='m
 	
 	src_s = GetDOSNameW(src)
 	
-	catalog = parse_cuesheet(GetDOSNameW(cue), titleparser)
-
+	cdsize = GetCdSize(src_s)
+	catalog = parse_cuesheet(GetDOSNameW(cue), cdsize, titleparser)
+	
 	print ('Transcoding "%s" in %s' % (src, format.upper()))
 
 	# Opens a PIPE to read FFmpeg RAW output
